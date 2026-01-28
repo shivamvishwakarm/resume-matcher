@@ -1,4 +1,5 @@
 import { Zap } from 'lucide-react';
+import ModeToggle from '../ThemeProvider/ModeToggle';
 
 const Navbar = () => {
     return (
@@ -14,6 +15,7 @@ const Navbar = () => {
                 </div>
 
                 <div className="flex items-center gap-4">
+                    <ModeToggle />
                     <button type="button"
                         className='px-5 py-2 text-sm font-semibold rounded-full transition-all active:scale-95 bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200'
                     >
