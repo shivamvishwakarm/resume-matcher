@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/golang-jwt/jwt"
 	"github.com/shivamvishwakarm/resume-matcher/internal/models"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -71,6 +72,7 @@ func CreateUser(user models.User) (models.User, error) {
 		return models.User{}, err
 	}
 
+	// Todo: have to findout what is the best way to remove password field in the response
 	// Document to insert
 	doc := models.User{
 		Name:      user.Name,
@@ -89,4 +91,59 @@ func CreateUser(user models.User) (models.User, error) {
 	doc.ID = result.InsertedID.(bson.ObjectID)
 
 	return doc, nil
+}
+
+type LoginReq struct {
+	Email    string `json:"email" bson:"email"`
+	Password string `json:"password" bson:"password" `
+}
+
+type LoginRes struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Token string `json:"token"`
+}
+
+type User struct {
+	ID       bson.ObjectID `bson:"_id"`
+	Name     string        `bson:"name"`
+	Email    string        `bson:"email"`
+	Password string        `bson:"password"`
+}
+
+func LoginUser(user LoginReq) (LoginRes, error) {
+
+	coll := Client.Database(dbName).Collection(colName)
+
+	filter := bson.M{"email": user.Email}
+
+	var userDB User
+	err := coll.FindOne(context.TODO(), filter).Decode(&userDB)
+	if err != nil {
+		return LoginRes{}, errors.New("invalid credentials")
+	}
+
+	err = bcrypt.CompareHashAndPassword(
+		[]byte(userDB.Password),
+		[]byte(user.Password),
+	)
+	if err != nil {
+		return LoginRes{}, errors.New("invalid credentials")
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"name":  userDB.Name,
+		"email": userDB.Email,
+	})
+
+	tokenString, err := token.SignedString([]byte("verysecret123")) //todo: should comes from .env
+	if err != nil {
+		return LoginRes{}, err
+	}
+
+	return LoginRes{
+		Name:  userDB.Name,
+		Email: userDB.Email,
+		Token: tokenString,
+	}, nil
 }
