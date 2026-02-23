@@ -5,6 +5,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/shivamvishwakarm/resume-matcher/internal/config"
+	"github.com/shivamvishwakarm/resume-matcher/internal/controler"
+	"github.com/shivamvishwakarm/resume-matcher/internal/middleware"
 	"github.com/shivamvishwakarm/resume-matcher/internal/models"
 )
 
@@ -18,6 +20,8 @@ func main() {
 
 	v1.Post("/register", createuser)
 	v1.Post("/login", login)
+
+	v1.Get("/me", middleware.Auth(), controler.GetUser())
 
 	v1.Get("/health", func(c *fiber.Ctx) error {
 		return c.SendString("health")
@@ -45,6 +49,11 @@ func login(c *fiber.Ctx) error {
 		}))
 	}
 
+	c.Cookie(&fiber.Cookie{
+		Name:     "auth",
+		Value:    result.Token,
+		HTTPOnly: true,
+	})
 	return c.Status(fiber.StatusOK).JSON(result)
 }
 
