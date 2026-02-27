@@ -28,3 +28,12 @@ docker run -d -p 27017:27017 \
  --name mongodb \
  mongodb/mongodb-community-server:latest
 ```
+
+qudrant db:
+
+docker run -p 6333:6333 -p 6334:6334 \
+ -v "$(pwd)/qdrant_storage:/qdrant/storage:z" \
+ qdrant/qdrant
+
+using this as a embeding model:
+https://ollama.com/library/nomic-embed-text

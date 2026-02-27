@@ -2,7 +2,6 @@ package controler
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -39,18 +38,15 @@ func GetUser() fiber.Handler {
 
 		filter := bson.M{"email": email}
 
-		fmt.Print("filter", filter)
-
 		var user MeRes
 		err := coll.FindOne(context.TODO(), filter).Decode(&user)
 
 		if err != nil {
-			fmt.Println("DB error:", err)
+
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "User not found",
 			})
 		}
-		fmt.Print(user)
 
 		return c.JSON(user)
 	}
