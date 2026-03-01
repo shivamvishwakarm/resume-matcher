@@ -30,8 +30,10 @@ func main() {
 
 	v1.Post("/register", createuser)
 	v1.Post("/login", login)
-	v1.Post("/upload-resume", uploadResume)
+	v1.Post("/upload-resume", middleware.Auth(), uploadResume)
 	v1.Get("/me", middleware.Auth(), controler.GetUser())
+	v1.Post("/match-resume", middleware.Auth(), getBestResume)
+	v1.Get("/resumes", middleware.Auth(), controler.GetAllResume)
 
 	v1.Get("/health", func(c *fiber.Ctx) error {
 		return c.SendString("health")
@@ -88,6 +90,10 @@ func createuser(c *fiber.Ctx) error {
 }
 
 func uploadResume(c *fiber.Ctx) error {
+
+	// Get the logged-in user's email
+	userClaims, _ := c.Locals("user").(map[string]interface{})
+	userEmail, _ := userClaims["email"].(string)
 
 	// 1. Get the PDF file from the multipart form
 	file, err := c.FormFile("resume")
@@ -155,6 +161,7 @@ func uploadResume(c *fiber.Ctx) error {
 				Id:      qdrant.NewID(pointID),
 				Vectors: qdrant.NewVectors(embedding...),
 				Payload: qdrant.NewValueMap(map[string]any{
+					"user_email":  userEmail,
 					"filename":    file.Filename,
 					"filepath":    savePath,
 					"uploaded_at": time.Now().Format(time.RFC3339),
@@ -169,9 +176,98 @@ func uploadResume(c *fiber.Ctx) error {
 		})
 	}
 
+	// 6. Save resume metadata to MongoDB
+	resumeDoc := models.Resume{
+		UserEmail:  userEmail,
+		Filename:   file.Filename,
+		Filepath:   savePath,
+		QdrantID:   pointID,
+		UploadedAt: time.Now(),
+	}
+
+	coll := config.Db.Collection("resumes")
+	_, err = coll.InsertOne(context.TODO(), resumeDoc)
+	if err != nil {
+		log.Println("Error saving resume metadata to MongoDB:", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to save resume metadata",
+		})
+	}
+
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message":  "Resume uploaded and processed successfully",
 		"point_id": pointID,
 		"filename": file.Filename,
+	})
+}
+
+type matchRequest struct {
+	JobDescription string `json:"job_description"`
+}
+
+func getBestResume(c *fiber.Ctx) error {
+
+	// Get the logged-in user's email
+	userClaims, _ := c.Locals("user").(map[string]interface{})
+	userEmail, _ := userClaims["email"].(string)
+
+	// 1. Parse the job description from the request body
+	var req matchRequest
+	if err := c.BodyParser(&req); err != nil || req.JobDescription == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "job_description is required in request body",
+		})
+	}
+
+	// 2. Generate embedding for the job description
+	embedding, err := services.GenerateEmbedding(req.JobDescription)
+	if err != nil {
+		log.Println("Error generating embedding for JD:", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to generate embedding for job description",
+		})
+	}
+
+	// 3. Search Qdrant for the most similar resumes — only this user's resumes
+	limit := uint64(10)
+	searchResult, err := config.QdrantClient.Query(context.Background(), &qdrant.QueryPoints{
+		CollectionName: config.ResumeCollectionName,
+		Query:          qdrant.NewQuery(embedding...),
+		Filter: &qdrant.Filter{
+			Must: []*qdrant.Condition{
+				qdrant.NewMatch("user_email", userEmail),
+			},
+		},
+		WithPayload: qdrant.NewWithPayload(true),
+		Limit:       &limit,
+	})
+	if err != nil {
+		log.Println("Error querying Qdrant:", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to search resumes",
+		})
+	}
+
+	// 4. Return the best matching resumes with match percentage
+	results := make([]fiber.Map, 0, len(searchResult))
+	for _, point := range searchResult {
+		matchPercent := point.Score * 100 // cosine similarity as percentage
+
+		filename := ""
+		if fn, ok := point.Payload["filename"]; ok {
+			filename = fn.GetStringValue()
+		}
+
+		results = append(results, fiber.Map{
+			"id":            point.Id.GetUuid(),
+			"filename":      filename,
+			"match_percent": fmt.Sprintf("%.2f%%", matchPercent),
+			"score":         point.Score,
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"total_results": len(results),
+		"results":       results,
 	})
 }
